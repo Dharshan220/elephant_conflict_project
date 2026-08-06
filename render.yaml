@@ -39,6 +39,10 @@ services:
       # to PostgreSQL requires code changes, it is NOT just an env var today.
       - key: TUSKER_DB_URL
         value: ""
+      # Firebase project used to verify Firebase Auth ID tokens at
+      # /api/auth/firebase. Defaults to this value in code if unset.
+      - key: FIREBASE_PROJECT_ID
+        value: elephant-67342
 
   # ------------------------------------------------------------------ frontend
   - type: web
