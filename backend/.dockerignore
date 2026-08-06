@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+firebase/*.json
+database/*.db
+_test*.py
+_selftest.py
+_smoke.py
