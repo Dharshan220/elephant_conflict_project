@@ -26,9 +26,19 @@ import { genPredictions } from '../mockData/predictions'
 import { genAnalytics } from '../mockData/analytics'
 
 const API = axios.create({
-  baseURL: (import.meta.env.VITE_API_URL as string) || 'http://localhost:8000',
+  baseURL:
+    (import.meta.env.VITE_API_URL as string) ||
+    (import.meta.env.DEV ? 'http://localhost:8000' : window.location.origin),
   timeout: 4000,
 })
+
+export class ApiError extends Error {
+  status: number | null
+  constructor(status: number | null, message: string) {
+    super(message)
+    this.status = status
+  }
+}
 
 let backendOnline = false
 
@@ -136,20 +146,66 @@ export const api = {
     guarded(async () => (await API.get<{ running: boolean }>(`/api/simulate?on=${on}`)).data, () => ({ running: on })),
 
   // ---- Elephant Early Warning System ----
-  login: (email: string, password: string): Promise<AuthResponse> =>
-    guarded(async () => (await API.post<AuthResponse>('/api/auth/login', { email, password })).data, () => {
-      throw new Error('Backend offline')
-    }),
+  login: async (email: string, password: string): Promise<AuthResponse> => {
+    try {
+      const res = await API.post<AuthResponse>('/api/auth/login', { email, password }, { timeout: 60000 })
+      backendOnline = true
+      return res.data
+    } catch (e) {
+      backendOnline = false
+      if (axios.isAxiosError(e)) throw new ApiError(e.response?.status ?? null, 'Backend unreachable')
+      throw e
+    }
+  },
 
-  register: (payload: RegisterPayload): Promise<AuthResponse> =>
-    guarded(async () => (await API.post<AuthResponse>('/api/auth/register', payload)).data, () => {
-      throw new Error('Backend offline')
-    }),
+  register: async (payload: RegisterPayload): Promise<AuthResponse> => {
+    try {
+      const res = await API.post<AuthResponse>('/api/auth/register', payload, { timeout: 60000 })
+      backendOnline = true
+      return res.data
+    } catch (e) {
+      backendOnline = false
+      if (axios.isAxiosError(e)) throw new ApiError(e.response?.status ?? null, 'Backend unreachable')
+      throw e
+    }
+  },
 
-  me: (): Promise<UserInfo> =>
-    guarded(async () => (await API.get<UserInfo>('/api/me')).data, () => {
-      throw new Error('Backend offline')
-    }),
+  me: async (): Promise<UserInfo> => {
+    try {
+      const res = await API.get<UserInfo>('/api/me', { timeout: 60000 })
+      backendOnline = true
+      return res.data
+    } catch (e) {
+      backendOnline = false
+      if (axios.isAxiosError(e)) throw new ApiError(e.response?.status ?? null, 'Backend unreachable')
+      throw e
+    }
+  },
+
+  // ---- Firebase Auth (exchanges a Firebase ID token for an app JWT) ----
+  firebaseLogin: async (idToken: string): Promise<AuthResponse> => {
+    try {
+      const res = await API.post<AuthResponse>('/api/auth/firebase', { id_token: idToken }, { timeout: 60000 })
+      backendOnline = true
+      return res.data
+    } catch (e) {
+      backendOnline = false
+      if (axios.isAxiosError(e)) throw new ApiError(e.response?.status ?? null, 'Backend unreachable')
+      throw e
+    }
+  },
+
+  firebaseRegister: async (idToken: string, profile: Partial<RegisterPayload>): Promise<AuthResponse> => {
+    try {
+      const res = await API.post<AuthResponse>('/api/auth/firebase/register', { id_token: idToken, ...profile }, { timeout: 60000 })
+      backendOnline = true
+      return res.data
+    } catch (e) {
+      backendOnline = false
+      if (axios.isAxiosError(e)) throw new ApiError(e.response?.status ?? null, 'Backend unreachable')
+      throw e
+    }
+  },
 
   fetchCameras: (): Promise<CameraItem[]> =>
     guarded(async () => (await API.get<CameraItem[]>('/api/cameras')).data, () => []),

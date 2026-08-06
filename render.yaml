@@ -48,6 +48,12 @@ services:
     rootDir: frontend
     buildCommand: npm install && npm run build
     publishPath: dist
+    # SPA fallback: serve index.html for any unknown path (client-side routing).
+    # Without this, refreshing /login or /app returns Render's "Not Found" 404.
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
     envVars:
       # SET THESE IN THE RENDER DASHBOARD (envVars for the ui service) -
       #   VITE_API_URL = https://<your-api-service>.onrender.com

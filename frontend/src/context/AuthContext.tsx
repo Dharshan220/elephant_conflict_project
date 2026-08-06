@@ -1,7 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { AuthResponse, RegisterPayload, UserInfo } from '../types'
-import { api, authToken, setAuthToken } from '../services/api'
+import { api, authToken, setAuthToken, ApiError } from '../services/api'
+import { firebaseSignIn, firebaseSignOut, firebaseSignUp } from '../services/firebase'
 import { useToast } from './ToastContext'
 
 const USER_KEY = 'tuskerguard-user'
@@ -42,13 +43,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     async (email: string, password: string) => {
+      // 1) Try Firebase Auth first (real user accounts).
       try {
-        const res = await api.login(email, password)
+        const idToken = await firebaseSignIn(email.trim(), password)
+        const res = await api.firebaseLogin(idToken)
         persist(res)
         push('success', `Welcome back, ${res.user.name}`)
         return true
-      } catch {
-        push('error', 'Login failed', 'Invalid email or password')
+      } catch (err) {
+        // 2) Fall back to the built-in backend login (demo accounts, offline backend).
+        if (!(err instanceof ApiError)) {
+          try {
+            const res = await api.login(email.trim(), password)
+            persist(res)
+            push('success', `Welcome back, ${res.user.name}`)
+            return true
+          } catch (legacyErr) {
+            if (legacyErr instanceof ApiError && legacyErr.status === 401) {
+              push('error', 'Login failed', 'Invalid email or password')
+            } else {
+              push('error', 'Cannot reach server', 'The backend may still be starting — wait a few seconds and retry.')
+            }
+            return false
+          }
+        }
+        if (err.status === 401) {
+          push('error', 'Login failed', 'Invalid email or password')
+        } else {
+          push('error', 'Cannot reach server', 'The backend may still be starting — wait a few seconds and retry.')
+        }
         return false
       }
     },
@@ -57,13 +80,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const register = useCallback(
     async (payload: RegisterPayload) => {
+      // 1) Create the account in Firebase Auth.
       try {
-        const res = await api.register(payload)
+        const { idToken } = await firebaseSignUp(payload.email, payload.password)
+        // 2) Complete registration in the backend (stores profile + issues app JWT).
+        const res = await api.firebaseRegister(idToken, payload)
         persist(res)
         push('success', 'Account created', `Welcome, ${res.user.name}`)
         return true
-      } catch {
-        push('error', 'Registration failed', 'Email may already be registered')
+      } catch (err) {
+        if (err instanceof ApiError) {
+          push('error', 'Registration failed', err.status === 409 ? 'Email may already be registered' : 'Backend not reachable')
+        } else {
+          const code = (err as { code?: string })?.code ?? ''
+          if (code === 'auth/email-already-in-use') push('error', 'Registration failed', 'This email is already registered')
+          else if (code === 'auth/weak-password') push('error', 'Registration failed', 'Password must be at least 6 characters')
+          else push('error', 'Registration failed', 'Check that Email/Password sign-in is enabled in Firebase Console')
+        }
         return false
       }
     },
@@ -71,6 +104,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 
   const logout = useCallback(() => {
+    firebaseSignOut()
     setAuthToken(null)
     try {
       localStorage.removeItem(USER_KEY)

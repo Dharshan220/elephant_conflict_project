@@ -4,7 +4,15 @@ import type { AlertRecord } from '../types'
 import { useToast } from './ToastContext'
 import { useAlertSound } from './AppContext'
 
-const WS_URL = `${import.meta.env.VITE_WS_URL || 'ws://localhost:8000'}/ws/alerts`
+const WS_URL = resolveWsUrl()
+
+function resolveWsUrl(): string {
+  const raw = import.meta.env.VITE_WS_URL as string | undefined
+  if (raw) return raw.replace(/\/$/, '') + '/ws/alerts'
+  const api = import.meta.env.VITE_API_URL as string | undefined
+  if (api) return api.replace(/^http/, 'ws').replace(/\/$/, '') + '/ws/alerts'
+  return import.meta.env.DEV ? 'ws://localhost:8000/ws/alerts' : ''
+}
 
 export interface LiveAlertEvent {
   type: 'alert' | 'resolve' | 'welcome'
@@ -67,6 +75,7 @@ export function LiveAlertProvider({ children }: { children: ReactNode }) {
   )
 
   useEffect(() => {
+    if (!WS_URL) return
     const ws = new WebSocket(WS_URL)
     ws.onopen = () => setConnected(true)
     ws.onclose = () => setConnected(false)

@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 import data as seed
 import database as db
+import firebase_auth
 import security
 from push import init_firebase, send_alert_push
 
@@ -628,6 +629,15 @@ class PushTokenPayload(BaseModel):
     token: str
 
 
+class FirebaseAuthPayload(BaseModel):
+    id_token: str
+    name: str = ""
+    phone: str = ""
+    village: str = ""
+    latitude: float = 0.0
+    longitude: float = 0.0
+
+
 def _public_user(user: dict) -> dict:
     return {
         "id": user["id"],
@@ -667,6 +677,44 @@ def login(payload: LoginPayload):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     token = security.create_token(user["id"], user["email"], bool(user["is_admin"]), user.get("role", "user"))
     return {"token": token, "user": _public_user(user)}
+
+
+def _token_from_firebase_claims(claims: dict, payload: FirebaseAuthPayload) -> dict:
+    """Find-or-create the local user for a verified Firebase account, then mint an app JWT."""
+    email = claims["email"]
+    user = db.get_user_by_email(email)
+    if user is None:
+        name = payload.name or claims.get("name") or email.split("@")[0]
+        import secrets
+
+        db.create_user(
+            name,
+            email,
+            payload.phone,
+            payload.village,
+            payload.latitude,
+            payload.longitude,
+            security.hash_password(secrets.token_hex(24)),
+        )
+        user = db.get_user_by_email(email)
+    token = security.create_token(user["id"], user["email"], bool(user["is_admin"]), user.get("role", "user"))
+    return {"token": token, "user": _public_user(user)}
+
+
+@app.post("/api/auth/firebase")
+def firebase_login(payload: FirebaseAuthPayload):
+    """Sign in with a Firebase ID token (email/password or Google). Auto-creates the account."""
+    claims = firebase_auth.verify_id_token(payload.id_token)
+    return _token_from_firebase_claims(claims, payload)
+
+
+@app.post("/api/auth/firebase/register")
+def firebase_register(payload: FirebaseAuthPayload):
+    """Complete registration for a Firebase account with extra profile fields."""
+    claims = firebase_auth.verify_id_token(payload.id_token)
+    if db.get_user_by_email(claims["email"]) is not None:
+        raise HTTPException(status_code=409, detail="Email already registered")
+    return _token_from_firebase_claims(claims, payload)
 
 
 @app.get("/api/me")
